@@ -103,7 +103,7 @@ int MyIOCP::acceptOne()
 		iError = reqAccept(pkCK);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
-			//closesocket(uiSocket);
+			closesocket(uiSocket);
 			CloseThreadpoolIo(pkCK->pkIO);
 			delete pkCK;
 		}
