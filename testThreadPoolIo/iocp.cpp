@@ -21,9 +21,10 @@ VOID CALLBACK IoCompletionCallback(PTP_CALLBACK_INSTANCE Instance,
 		{
 			break;
 		}
-		PMyCompleteKey pkCK = pkOL->pkCk;
-		if (pkCK == NULL)
+		MySharedCompleteKey kCK = pkOL->kSharedCk;
+		if (kCK.get() == NULL)
 		{
+			delete pkOL;
 			break;
 		}
 		switch (pkOL->eType)
@@ -48,7 +49,8 @@ VOID CALLBACK IoCompletionCallback(PTP_CALLBACK_INSTANCE Instance,
 }
 
 MyIOCP::MyIOCP(unsigned short usListenPort)
-	:_usListenPort(usListenPort)
+	:_usListenPort(usListenPort),
+	_ListenCK(new MyCompleteKey())
 {
 	initExtensionFuncPtr();
 	int iError = ERROR_SUCCESS;
@@ -57,9 +59,9 @@ MyIOCP::MyIOCP(unsigned short usListenPort)
 	{
 		exit(0);
 	}
-
-	_ListenCK.uiSocket = uiListenSocket;
-	_ListenCK.pkIO = CreateThreadpoolIo((HANDLE)_ListenCK.uiSocket, 
+	
+	_ListenCK->uiSocket = uiListenSocket;
+	_ListenCK->pkIO = CreateThreadpoolIo((HANDLE)_ListenCK->uiSocket,
 		(PTP_WIN32_IO_CALLBACK)IoCompletionCallback,
 		this, 
 		NULL);
@@ -83,29 +85,27 @@ int MyIOCP::acceptOne()
 		{
 			break;
 		}
-		PMyCompleteKey pkCK = new MyCompleteKey();
-		if (pkCK == NULL)
+		MySharedCompleteKey kCK(new MyCompleteKey());
+		if (kCK.get() == NULL)
 		{
 			closesocket(uiSocket);
 			break;
 		}
-		pkCK->uiSocket = uiSocket;
-		pkCK->pkIO = CreateThreadpoolIo((HANDLE)pkCK->uiSocket,
+		kCK->uiSocket = uiSocket;
+		kCK->pkIO = CreateThreadpoolIo((HANDLE)kCK->uiSocket,
 			(PTP_WIN32_IO_CALLBACK)IoCompletionCallback,
 			this,
 			NULL);
-		if (pkCK->pkIO == NULL)
+		if (kCK->pkIO == NULL)
 		{
 			closesocket(uiSocket);
-			delete pkCK;
 			break;
 		}
-		iError = reqAccept(pkCK);
+		iError = reqAccept(kCK);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
 			closesocket(uiSocket);
-			CloseThreadpoolIo(pkCK->pkIO);
-			delete pkCK;
+			CloseThreadpoolIo(kCK->pkIO);
 		}
 	} while (0);
 
@@ -199,24 +199,23 @@ SOCKET MyIOCP::createAcceptSocket(int& iError)
 	return	uiListenSocket;
 }
 
-int MyIOCP::mySend(PMyCompleteKey pkCK, myBuffer kSend)
+int MyIOCP::mySend(MySharedCompleteKey kCK, myBuffer& rSend)
 {
 	int iRet = FALSE;
 	do
 	{
-		if (kSend.size() <= 0)
+		if (rSend.size() <= 0)
 		{
 			break;
 		}
-		int iError = reqSend(pkCK, std::move(kSend));
+		int iError = reqSend(kCK, rSend);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
-			printf("SEND: FAIL [%s] -> ip[%s], port[%u], reqSend error=%d\n", kSend.data(),
-				pkCK->pcRemoteIp, pkCK->usRemotePort, iError);
+			printf("SEND: FAIL [%s] -> ip[%s], port[%u], reqSend error=%d\n", rSend.beginRead(),
+				kCK->pcRemoteIp, kCK->usRemotePort, iError);
 
-			closesocket(pkCK->uiSocket);
-			CloseThreadpoolIo(pkCK->pkIO);
-			delete pkCK;
+			closesocket(kCK->uiSocket);
+
 			break;
 		}
 		iRet = TRUE;
@@ -224,7 +223,7 @@ int MyIOCP::mySend(PMyCompleteKey pkCK, myBuffer kSend)
 
 	return iRet;
 }
-int MyIOCP::mySend(PMyCompleteKey pkCK, char* pcSend, int iLen)
+int MyIOCP::mySend(MySharedCompleteKey kCK, char* pcSend, int iLen)
 {
 	int iRet = FALSE;
 	do 
@@ -233,7 +232,7 @@ int MyIOCP::mySend(PMyCompleteKey pkCK, char* pcSend, int iLen)
 		{
 			break;
 		}
-		iRet = mySend(pkCK, std::move(myBuffer(pcSend, iLen)));
+		iRet = mySend(kCK, myBuffer(pcSend, iLen));
 	} while (0);
 	
 	return iRet;
@@ -242,37 +241,37 @@ int MyIOCP::mySend(PMyCompleteKey pkCK, char* pcSend, int iLen)
 
 void MyIOCP::handSend(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBytesTransferred)
 {
-	PMyCompleteKey pkCK = pkOL->pkCk;
+	MySharedCompleteKey kCK = pkOL->kSharedCk;
 	bool bSucc = false;
 	do 
 	{
 		if (IoResult != ERROR_SUCCESS)
 		{
-			printf("SEND: FAIL [%s] -> ip[%s], port[%u], IoResult=%d\n", pkOL->kBuffer.data(),
-				pkCK->pcRemoteIp, pkCK->usRemotePort, IoResult);
+			printf("SEND: FAIL [%s] -> ip[%s], port[%u], IoResult=%d\n", pkOL->kBuffer.beginRead(),
+				kCK->pcRemoteIp, kCK->usRemotePort, IoResult);
 			break;
 		}
 
-		printf("SEND:[%s] -> ip[%s], port[%u]\n", pkOL->kBuffer.data(),
-			pkCK->pcRemoteIp, pkCK->usRemotePort);
+		printf("SEND:[%s] -> ip[%s], port[%u]\n", pkOL->kBuffer.beginRead(),
+			kCK->pcRemoteIp, kCK->usRemotePort);
 
 		myBuffer kBuffer;
 		{
-			CLocalLock<CCriSec400> kLocker(pkCK->ccsSend);
-			pkCK->iSendCnt--;
-			if (pkCK->kSendList.size() > 0)
+			CLocalLock<CCriSec400> kLocker(kCK->ccsSend);
+			kCK->iSendCnt--;
+			if (kCK->kSendList.size() > 0)
 			{
-				kBuffer = std::move(pkCK->kSendList.front());
-				pkCK->kSendList.pop_front();
+				kBuffer = std::move(kCK->kSendList.front());
+				kCK->kSendList.pop_front();
 			}
 		}
 		if (kBuffer.size() > 0)
 		{
-			int iError = postSend(pkCK, std::move(kBuffer));
+			int iError = postSend(kCK, kBuffer);
 			if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 			{
-				printf("SEND: FAIL [%s] -> ip[%s], port[%u], postSend error=%d\n", kBuffer.data(),
-					pkCK->pcRemoteIp, pkCK->usRemotePort, iError);
+				printf("SEND: FAIL [%s] -> ip[%s], port[%u], postSend error=%d\n", kBuffer.beginRead(),
+					kCK->pcRemoteIp, kCK->usRemotePort, iError);
 				break;
 			}
 		}
@@ -282,15 +281,13 @@ void MyIOCP::handSend(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfByte
 	delete pkOL;
 	if (!bSucc)
 	{
-		closesocket(pkCK->uiSocket);
-		CloseThreadpoolIo(pkCK->pkIO);
-		delete pkCK;
+		closesocket(kCK->uiSocket);
 	}
 }
 
 void MyIOCP::handRecv(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBytesTransferred)
 {
-	PMyCompleteKey pkCK = pkOL->pkCk;
+	MySharedCompleteKey kCK = pkOL->kSharedCk;
 	bool bSucc = false;
 
 	do
@@ -298,28 +295,28 @@ void MyIOCP::handRecv(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfByte
 		if (NumberOfBytesTransferred == 0)
 		{
 			printf("Active disconnect: ip[%s], port[%u]\n",
-				pkCK->pcRemoteIp, pkCK->usRemotePort);
+				kCK->pcRemoteIp, kCK->usRemotePort);
 			break;
 		}
 
 		if (IoResult != ERROR_SUCCESS)
 		{
 			printf("RECV: FAIL ip[%s], port[%u], IoResult=%d\n",
-				pkCK->pcRemoteIp, pkCK->usRemotePort, IoResult);
+				kCK->pcRemoteIp, kCK->usRemotePort, IoResult);
 			break;
 		}
 
-		pkOL->kBuffer.hasWritten(NumberOfBytesTransferred);
-		printf("RECV:[%s] <- ip[%s], port[%u]\n", pkOL->kBuffer.data(),
-			pkCK->pcRemoteIp, pkCK->usRemotePort);
+		pkOL->kBuffer.hasWritten((int)NumberOfBytesTransferred);
+		printf("RECV:[%s] <- ip[%s], port[%u]\n", pkOL->kBuffer.beginRead(),
+			kCK->pcRemoteIp, kCK->usRemotePort);
 
-		mySend(pkCK, std::move(pkOL->kBuffer));
+		mySend(kCK, pkOL->kBuffer);
 
-		int iError = reqRecv(pkCK);
+		int iError = reqRecv(kCK);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
 			printf("handRecv reqRecv fail ip[%s], port[%u], iError=%d\n", 
-				pkCK->pcRemoteIp, pkCK->usRemotePort, iError);
+				kCK->pcRemoteIp, kCK->usRemotePort, iError);
 			break;
 		}
 		
@@ -329,15 +326,14 @@ void MyIOCP::handRecv(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfByte
 	delete pkOL;
 	if (!bSucc)
 	{
-		closesocket(pkCK->uiSocket);
-		CloseThreadpoolIo(pkCK->pkIO);
-		delete pkCK;
+		closesocket(kCK->uiSocket);
+		CloseThreadpoolIo(kCK->pkIO);
 	}
 }
 
 void MyIOCP::handAccept(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBytesTransferred)
 {
-	PMyCompleteKey pkCK = pkOL->pkCk;
+	MySharedCompleteKey kCK = pkOL->kSharedCk;
 	bool bSucc = false;
 	do 
 	{
@@ -347,14 +343,14 @@ void MyIOCP::handAccept(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBy
 			break;
 		}
 		getSocketAddrs(_lpfnGetAcceptExSockAddrs,
-			pkCK,
+			kCK,
 			pkOL->kWSABuf.buf,
-			NumberOfBytesTransferred);
+			(int)NumberOfBytesTransferred);
 
-		if (setsockopt(pkCK->uiSocket,
+		if (setsockopt(kCK->uiSocket,
 			SOL_SOCKET,
 			SO_UPDATE_ACCEPT_CONTEXT,
-			(const char*)&_ListenCK.uiSocket,
+			(const char*)&_ListenCK->uiSocket,
 			sizeof(SOCKET)) == SOCKET_ERROR)
 		{
 			printf("handAccept setsockopt SO_UPDATE_ACCEPT_CONTEXT error=%d\n", 
@@ -362,9 +358,9 @@ void MyIOCP::handAccept(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBy
 			break;
 		}
 
-		printf("ACCEPT: ip[%s], port[%u]----\n", pkCK->pcRemoteIp, pkCK->usRemotePort);
+		printf("ACCEPT: ip[%s], port[%u]----\n", kCK->pcRemoteIp, kCK->usRemotePort);
 
-		int iError = reqRecv(pkCK);
+		int iError = reqRecv(kCK);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
 			printf("handAccept reqRecv fail iError=%d\n", iError);
@@ -375,9 +371,8 @@ void MyIOCP::handAccept(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBy
 
 	if (!bSucc)
 	{
-		closesocket(pkCK->uiSocket);
-		CloseThreadpoolIo(pkCK->pkIO);
-		delete pkCK;
+		closesocket(kCK->uiSocket);
+		CloseThreadpoolIo(kCK->pkIO);
 	}
 
 	delete pkOL;
@@ -405,45 +400,45 @@ void MyIOCP::initExtensionFuncPtr()
 	getExtensionFuncPtr((LPVOID*)&_lpfnGetAcceptExSockAddrs, uiSocket, guid);
 }
 
-int MyIOCP::reqSend(PMyCompleteKey pkCK, myBuffer kSend)
+int MyIOCP::reqSend(MySharedCompleteKey kCK, myBuffer& rSend)
 {
 	bool bWSSend = false;
 	int iError = ERROR_SUCCESS;
 	do
 	{
-		CLocalLock<CCriSec400> kLocker(pkCK->ccsSend);
-		pkCK->iSendCnt++;
-		if (pkCK->iSendCnt == 1)
+		CLocalLock<CCriSec400> kLocker(kCK->ccsSend);
+		kCK->iSendCnt++;
+		if (kCK->iSendCnt == 1)
 		{
 			bWSSend = true;
 			break;
 		}
-		pkCK->kSendList.push_back(std::move(kSend));
+		kCK->kSendList.push_back(std::move(rSend));
 	} while (0);
 	if (bWSSend)
 	{
-		iError = postSend(pkCK, std::move(kSend));
+		iError = postSend(kCK, rSend);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
 
-			CLocalLock<CCriSec400> kLocker(pkCK->ccsSend);
-			pkCK->iSendCnt--;
+			CLocalLock<CCriSec400> kLocker(kCK->ccsSend);
+			kCK->iSendCnt--;
 		}
 	}
 
 	return iError;
 }
 
-int MyIOCP::reqRecv(PMyCompleteKey pkCK)
+int MyIOCP::reqRecv(MySharedCompleteKey kCK)
 {
-	return postRecv(pkCK);
+	return postRecv(kCK);
 }
 
 
 
-int MyIOCP::reqAccept(PMyCompleteKey pkCK)
+int MyIOCP::reqAccept(MySharedCompleteKey kCK)
 {
-	return postAccept(_pfnAcceptEx, &_ListenCK, pkCK);
+	return postAccept(_pfnAcceptEx, _ListenCK, kCK);
 }
 
 

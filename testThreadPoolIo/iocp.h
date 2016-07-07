@@ -11,8 +11,8 @@ public:
 	void startAccept();
 	int acceptOne();
 	
-	int mySend(PMyCompleteKey pkCK, char* pcSend, int iLen);
-	int mySend(PMyCompleteKey pkCK, myBuffer kSend);
+	int mySend(MySharedCompleteKey kCK, char* pcSend, int iLen);
+	int mySend(MySharedCompleteKey kCK, myBuffer& rSend);
 
 	friend VOID CALLBACK IoCompletionCallback(PTP_CALLBACK_INSTANCE Instance,
 		PVOID Context,
@@ -27,9 +27,9 @@ protected:
 
 
 	void initExtensionFuncPtr();
-	int reqSend(PMyCompleteKey pkCK, myBuffer kSend);
-	int reqAccept(PMyCompleteKey pkCK);
-	int reqRecv(PMyCompleteKey pkCK);
+	int reqSend(MySharedCompleteKey kCK, myBuffer& rSend);
+	int reqAccept(MySharedCompleteKey kCK);
+	int reqRecv(MySharedCompleteKey kCK);
 	
 	SOCKET createListenSocket(unsigned short usListenPort, int& iError);
 	SOCKET createAcceptSocket(int& iError);
@@ -38,7 +38,7 @@ private:
 	LPFN_DISCONNECTEX _pfnDisconnectEx;
 	LPFN_GETACCEPTEXSOCKADDRS _lpfnGetAcceptExSockAddrs;
 
-	MyCompleteKey _ListenCK;
+	MySharedCompleteKey _ListenCK;
 	unsigned short _usListenPort;
 };
 

@@ -5,6 +5,7 @@
 #include <utility>
 #include <algorithm>
 #include <iostream>
+#include <memory>
 
 #include <Winsock2.h>
 #include <mswsock.h>
@@ -115,7 +116,7 @@ public:
 		return begin() + _writePos;
 	}
 
-	char* data()
+	char* beginRead()
 	{
 		return begin() + _readPos;
 	}
@@ -127,7 +128,7 @@ public:
 
 	int writableBytes() const
 	{
-		return _buf.size() - _writePos;
+		return (int)_buf.size() - _writePos;
 	}
 
 	void hasWritten(int iLen)
@@ -180,7 +181,6 @@ protected:
 
 typedef std::list<myBuffer> MyBufferList;
 
-
 typedef struct _CompleteKey
 {
 	SOCKET uiSocket;		/// 套接字
@@ -189,7 +189,6 @@ typedef struct _CompleteKey
 	unsigned short usLocalPort;	/// 本地端口
 	char pcRemoteIp[16];	/// 远程ip
 	char pcLocalIp[16];	/// 本地ip
-
 
 	CCriSec400 ccsSend;
 	int iSendCnt;
@@ -223,8 +222,9 @@ typedef struct _CompleteKey
 		usLocalPort = 0;
 		kSendList.clear();
 	}
-} MyCompleteKey, *PMyCompleteKey;
+} MyCompleteKey;
 
+typedef std::shared_ptr<MyCompleteKey> MySharedCompleteKey;
 //typedef std::map<CONNID, PMyCompleteKey> CKPtrMap;
 
 enum EOverlappedType /// 操作类型
@@ -243,13 +243,12 @@ typedef struct _Overlapped
 	EOverlappedType eType;
 	WSABUF kWSABuf;
 	myBuffer kBuffer;
-	PMyCompleteKey pkCk;
+	MySharedCompleteKey kSharedCk;
 
 	_Overlapped()
 	{
 		memset(&kOverlapped, 0, sizeof(kOverlapped));
 		memset(&kWSABuf, 0, sizeof(kWSABuf));
-		pkCk = NULL;
 		long lCnt = InterlockedIncrement(&lCnt_OverlappedCreate);
 		std::cout << "_Overlapped :" << lCnt << std::endl;
 	}
@@ -265,13 +264,14 @@ typedef struct _Overlapped
 // 获取 Socket 的某个扩展函数的指针
 int getExtensionFuncPtr(LPVOID* plpf, SOCKET sock, GUID guid);
 
-int postSend(PMyCompleteKey pkCK, myBuffer kSend);
-int postAccept(LPFN_ACCEPTEX pfnAcceptEx, PMyCompleteKey pkCKListen, PMyCompleteKey pkCK);
-int postRecv(PMyCompleteKey pkCK);
-int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, PMyCompleteKey pkCK);
+int postSend(MySharedCompleteKey kSharedCk, myBuffer& rSend);
+int postAccept(LPFN_ACCEPTEX pfnAcceptEx, 
+	MySharedCompleteKey kSharedCkListen, MySharedCompleteKey kSharedCk);
+int postRecv(MySharedCompleteKey kSharedCk);
+int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, MySharedCompleteKey kSharedCk);
 
 void getSocketAddrs(LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockAddrs,
-	PMyCompleteKey pkCK,
+	MySharedCompleteKey kSharedCk,
 	char* pAcceptInfo,
 	int iRecvBytes);
 

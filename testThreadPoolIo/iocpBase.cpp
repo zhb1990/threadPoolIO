@@ -31,21 +31,21 @@ int getExtensionFuncPtr(LPVOID* plpf, SOCKET sock, GUID guid)
 	return iError;
 }
 
-int postSend(PMyCompleteKey pkCK, myBuffer kSend)
+int postSend(MySharedCompleteKey kSharedCk, myBuffer& rSend)
 {
 	PMyOverlapped pkOL = new MyOverlapped();
 	pkOL->eType = E_OLT_WSASEND;
-	pkOL->kBuffer = std::move(kSend);
-	pkOL->pkCk = pkCK;
-	pkOL->kWSABuf.buf = pkOL->kBuffer.data();
+	pkOL->kBuffer = std::move(rSend);
+	pkOL->kSharedCk = kSharedCk;
+	pkOL->kWSABuf.buf = pkOL->kBuffer.beginRead();
 	pkOL->kWSABuf.len = pkOL->kBuffer.size();
 	unsigned long	ulTransmitBytes = 0;
 
-	StartThreadpoolIo(pkCK->pkIO);
+	StartThreadpoolIo(kSharedCk->pkIO);
 
 	int iError = ERROR_SUCCESS;
 	if (::WSASend(
-		pkCK->uiSocket,
+		kSharedCk->uiSocket,
 		&pkOL->kWSABuf,
 		1,
 		&ulTransmitBytes,
@@ -56,8 +56,8 @@ int postSend(PMyCompleteKey pkCK, myBuffer kSend)
 		iError = ::WSAGetLastError();
 		if (iError != WSA_IO_PENDING)
 		{
-			kSend = std::move(pkOL->kBuffer);
-			CancelThreadpoolIo(pkCK->pkIO);
+			rSend = std::move(pkOL->kBuffer);
+			CancelThreadpoolIo(kSharedCk->pkIO);
 			delete pkOL;
 		}
 	}
@@ -65,7 +65,9 @@ int postSend(PMyCompleteKey pkCK, myBuffer kSend)
 	return iError;
 }
 
-int postAccept(LPFN_ACCEPTEX pfnAcceptEx, PMyCompleteKey pkCKListen, PMyCompleteKey pkCK)
+int postAccept(LPFN_ACCEPTEX pfnAcceptEx, 
+	MySharedCompleteKey kSharedCkListen, 
+	MySharedCompleteKey kSharedCk)
 {
 	int iError = ERROR_SUCCESS;
 
@@ -76,15 +78,15 @@ int postAccept(LPFN_ACCEPTEX pfnAcceptEx, PMyCompleteKey pkCKListen, PMyComplete
 
 	PMyOverlapped pkOL = new MyOverlapped();
 	pkOL->eType = E_OLT_ACCEPTEX;
-	pkOL->kWSABuf.buf = pkOL->kBuffer.data();
+	pkOL->kWSABuf.buf = pkOL->kBuffer.beginRead();
 	pkOL->kWSABuf.len = pkOL->kBuffer.size();
-	pkOL->pkCk = pkCK;
+	pkOL->kSharedCk = kSharedCk;
 
-	StartThreadpoolIo(pkCKListen->pkIO);
+	StartThreadpoolIo(kSharedCkListen->pkIO);
 
 	if (pfnAcceptEx(
-		pkCKListen->uiSocket,
-		pkCK->uiSocket,
+		kSharedCkListen->uiSocket,
+		kSharedCk->uiSocket,
 		pkOL->kWSABuf.buf,
 		ulReceiveDataBytes,
 		ulLocalAddressBytes,
@@ -95,7 +97,7 @@ int postAccept(LPFN_ACCEPTEX pfnAcceptEx, PMyCompleteKey pkCKListen, PMyComplete
 		iError = ::WSAGetLastError();
 		if (iError != WSA_IO_PENDING)
 		{
-			CancelThreadpoolIo(pkCK->pkIO);
+			CancelThreadpoolIo(kSharedCk->pkIO);
 			delete pkOL;
 		}
 	}
@@ -103,7 +105,7 @@ int postAccept(LPFN_ACCEPTEX pfnAcceptEx, PMyCompleteKey pkCKListen, PMyComplete
 	return iError;
 }
 
-int postRecv(PMyCompleteKey pkCK)
+int postRecv(MySharedCompleteKey kSharedCk)
 {
 	int iError = ERROR_SUCCESS;
 	DWORD	ulFlag = 0;
@@ -111,14 +113,14 @@ int postRecv(PMyCompleteKey pkCK)
 
 	PMyOverlapped pkOL = new MyOverlapped();
 	pkOL->eType = E_OLT_WSARECV;
-	pkOL->kWSABuf.buf = pkOL->kBuffer.data();
+	pkOL->kWSABuf.buf = pkOL->kBuffer.beginRead();
 	pkOL->kWSABuf.len = pkOL->kBuffer.writableBytes();
-	pkOL->pkCk = pkCK;
+	pkOL->kSharedCk = kSharedCk;
 
-	StartThreadpoolIo(pkCK->pkIO);
+	StartThreadpoolIo(kSharedCk->pkIO);
 
 	if (::WSARecv(
-		pkCK->uiSocket,
+		kSharedCk->uiSocket,
 		&pkOL->kWSABuf,
 		1,
 		&ulTransmitBytes,
@@ -129,7 +131,7 @@ int postRecv(PMyCompleteKey pkCK)
 		iError = ::WSAGetLastError();
 		if (iError != WSA_IO_PENDING)
 		{
-			CancelThreadpoolIo(pkCK->pkIO);
+			CancelThreadpoolIo(kSharedCk->pkIO);
 			delete pkOL;
 		}
 	}
@@ -137,20 +139,20 @@ int postRecv(PMyCompleteKey pkCK)
 	return iError;
 }
 
-int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, PMyCompleteKey pkCK)
+int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, MySharedCompleteKey kSharedCk)
 {
 	int iError = ERROR_SUCCESS;
 
 	PMyOverlapped pkOL = new MyOverlapped();
 	pkOL->eType = E_OLT_WSADISCONNECTEX;
-	pkOL->kWSABuf.buf = pkOL->kBuffer.data();
+	pkOL->kWSABuf.buf = pkOL->kBuffer.beginRead();
 	pkOL->kWSABuf.len = pkOL->kBuffer.size();
-	pkOL->pkCk = pkCK;
+	pkOL->kSharedCk = kSharedCk;
 
-	StartThreadpoolIo(pkCK->pkIO);
+	StartThreadpoolIo(kSharedCk->pkIO);
 
 	if (pfnDisconnectEx(
-		pkCK->uiSocket,
+		kSharedCk->uiSocket,
 		&pkOL->kOverlapped,
 		TF_REUSE_SOCKET,
 		0) == SOCKET_ERROR)
@@ -158,7 +160,7 @@ int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, PMyCompleteKey pkCK)
 		iError = ::WSAGetLastError();
 		if (iError != WSA_IO_PENDING)
 		{
-			CancelThreadpoolIo(pkCK->pkIO);
+			CancelThreadpoolIo(kSharedCk->pkIO);
 			delete pkOL;
 		}
 	}
@@ -166,9 +168,9 @@ int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, PMyCompleteKey pkCK)
 	return iError;
 }
 
-void getSocketAddrs(LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockAddrs,
-	PMyCompleteKey pkCK,
-	char* pAcceptInfo,
+void getSocketAddrs(LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockAddrs, 
+	MySharedCompleteKey kSharedCk, 
+	char * pAcceptInfo, 
 	int iRecvBytes)
 {
 	sockaddr_in*	pkLocalAddr = NULL;
@@ -183,11 +185,11 @@ void getSocketAddrs(LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockAddrs,
 	lpfnGetAcceptExSockAddrs(pAcceptInfo, iRecvBytes, ulLocalAddressBytes, ulRemoteAddressBytes,
 		(sockaddr**)&pkLocalAddr, &iLocalBytes, (sockaddr**)&pkRemoteAddr, &iRemoteBytes);
 	
-	InetNtop(pkLocalAddr->sin_family, (PVOID)&pkLocalAddr->sin_addr, pkCK->pcLocalIp, 16);
-	pkCK->usLocalPort = htons(pkLocalAddr->sin_port);
+	InetNtop(pkLocalAddr->sin_family, (PVOID)&pkLocalAddr->sin_addr, kSharedCk->pcLocalIp, 16);
+	kSharedCk->usLocalPort = htons(pkLocalAddr->sin_port);
 
-	InetNtop(pkRemoteAddr->sin_family, (PVOID)&pkRemoteAddr->sin_addr, pkCK->pcRemoteIp, 16);
-	pkCK->usRemotePort = htons(pkRemoteAddr->sin_port);
+	InetNtop(pkRemoteAddr->sin_family, (PVOID)&pkRemoteAddr->sin_addr, kSharedCk->pcRemoteIp, 16);
+	kSharedCk->usRemotePort = htons(pkRemoteAddr->sin_port);
 }
 
 
