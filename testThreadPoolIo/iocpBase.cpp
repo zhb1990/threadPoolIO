@@ -168,6 +168,38 @@ int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, MySharedCompleteKey kShare
 	return iError;
 }
 
+int postConnect(LPFN_CONNECTEX pfnConnectEx, 
+	MySharedCompleteKey kSharedCk, 
+	const SOCKADDR * name, 
+	int namelen)
+{
+	int iError = ERROR_SUCCESS;
+	PMyOverlapped pkOL = new MyOverlapped();
+	pkOL->eType = E_OLT_CONNECTEX;
+	pkOL->kWSABuf.buf = pkOL->kBuffer.beginRead();
+	pkOL->kWSABuf.len = pkOL->kBuffer.size();
+	pkOL->kSharedCk = kSharedCk;
+
+	StartThreadpoolIo(kSharedCk->pkIO);
+	if (pfnConnectEx(kSharedCk->uiSocket, 
+		name, 
+		namelen,
+		NULL, 
+		0,
+		NULL,
+		&pkOL->kOverlapped) == SOCKET_ERROR)
+	{
+		iError = ::WSAGetLastError();
+		if (iError != WSA_IO_PENDING)
+		{
+			CancelThreadpoolIo(kSharedCk->pkIO);
+			delete pkOL;
+		}
+	}
+
+	return iError;
+}
+
 void getSocketAddrs(LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockAddrs, 
 	MySharedCompleteKey kSharedCk, 
 	char * pAcceptInfo, 

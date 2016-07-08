@@ -269,7 +269,10 @@ int postAccept(LPFN_ACCEPTEX pfnAcceptEx,
 	MySharedCompleteKey kSharedCkListen, MySharedCompleteKey kSharedCk);
 int postRecv(MySharedCompleteKey kSharedCk);
 int postDisconnect(LPFN_DISCONNECTEX pfnDisconnectEx, MySharedCompleteKey kSharedCk);
-
+int postConnect(LPFN_CONNECTEX pfnConnectEx, 
+	MySharedCompleteKey kSharedCk, 
+	const SOCKADDR* name,
+	int namelen);
 void getSocketAddrs(LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockAddrs,
 	MySharedCompleteKey kSharedCk,
 	char* pAcceptInfo,

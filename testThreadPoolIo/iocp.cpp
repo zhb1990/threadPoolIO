@@ -1,5 +1,8 @@
 #include <stdio.h>
 #include "iocp.h"
+#include <Ws2tcpip.h>
+#include <gperftools/heap-profiler.h>
+#include <gperftools/malloc_extension.h>
 
 VOID CALLBACK IoCompletionCallback(PTP_CALLBACK_INSTANCE Instance, 
 	PVOID Context, 
@@ -41,6 +44,7 @@ VOID CALLBACK IoCompletionCallback(PTP_CALLBACK_INSTANCE Instance,
 			pkIOCP->handSend(IoResult, pkOL, NumberOfBytesTransferred);
 			break;
 		case E_OLT_CONNECTEX:
+			pkIOCP->handConnect(IoResult, pkOL, NumberOfBytesTransferred);
 			break;
 		default:
 			break;
@@ -69,16 +73,13 @@ MyIOCP::MyIOCP(unsigned short usListenPort)
 
 void MyIOCP::startAccept()
 {
-	for (int i = 0; i < 10; i ++)
-	{
-		acceptOne();
-	}
+	acceptOne();
 }
 
 int MyIOCP::acceptOne()
 {
 	int iError = ERROR_SUCCESS;
-	SOCKET uiSocket = createAcceptSocket(iError);
+	SOCKET uiSocket = createUISocket(iError);
 	do
 	{
 		if (uiSocket == SOCKET_ERROR)
@@ -110,6 +111,45 @@ int MyIOCP::acceptOne()
 	} while (0);
 
 	return iError;
+}
+
+MySharedCompleteKey MyIOCP::myConnect(char * pcIP, unsigned short usPort)
+{
+	MySharedCompleteKey kCKRet;
+	int iError = ERROR_SUCCESS;
+
+	SOCKET uiSocket = createUISocket(iError);
+	do
+	{
+		if (uiSocket == SOCKET_ERROR)
+		{
+			break;
+		}
+		MySharedCompleteKey kCK(new MyCompleteKey());
+		if (kCK.get() == NULL)
+		{
+			closesocket(uiSocket);
+			break;
+		}
+		kCK->uiSocket = uiSocket;
+		kCK->pkIO = CreateThreadpoolIo((HANDLE)kCK->uiSocket,
+			(PTP_WIN32_IO_CALLBACK)IoCompletionCallback,
+			this,
+			NULL);
+
+		strncpy_s(kCK->pcRemoteIp, pcIP, sizeof(kCK->pcRemoteIp));
+		kCK->usRemotePort = usPort;
+
+		iError = reqConnect(kCK, pcIP, usPort);
+		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
+		{
+			closesocket(uiSocket);
+			CloseThreadpoolIo(kCK->pkIO);
+		}
+		kCKRet = kCK;
+	} while (0);
+
+	return kCKRet;
 }
 
 SOCKET MyIOCP::createListenSocket(unsigned short usListenPort, int& iError)
@@ -175,28 +215,28 @@ SOCKET MyIOCP::createListenSocket(unsigned short usListenPort, int& iError)
 	return	uiListenSocket;
 }
 
-SOCKET MyIOCP::createAcceptSocket(int& iError)
+SOCKET MyIOCP::createUISocket(int& iError)
 {
 	iError = ERROR_SUCCESS;
-	SOCKET uiListenSocket = SOCKET_ERROR;
+	SOCKET uiSocket = SOCKET_ERROR;
 	do
 	{
 		/*create socket*/
-		uiListenSocket = WSASocketW(
+		uiSocket = WSASocketW(
 			AF_INET,
 			SOCK_STREAM,
 			IPPROTO_TCP,
 			NULL,
 			0,
 			WSA_FLAG_OVERLAPPED);
-		if (SOCKET_ERROR == uiListenSocket)
+		if (SOCKET_ERROR == uiSocket)
 		{
 			iError = WSAGetLastError();
 			break;
 		}
 	} while (0);
 
-	return	uiListenSocket;
+	return	uiSocket;
 }
 
 int MyIOCP::mySend(MySharedCompleteKey kCK, myBuffer& rSend)
@@ -310,8 +350,15 @@ void MyIOCP::handRecv(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfByte
 		printf("RECV:[%s] <- ip[%s], port[%u]\n", pkOL->kBuffer.beginRead(),
 			kCK->pcRemoteIp, kCK->usRemotePort);
 
-		mySend(kCK, pkOL->kBuffer);
-
+		if (!_stricmp(pkOL->kBuffer.beginRead(), "memstat"))
+		{
+			char buf[1024 * 64] = { 0 };
+			buf[0] = '\n';
+			MallocExtension::instance()->GetStats(buf + 1, sizeof(buf) - 1);
+			buf[strlen(buf)] = '\n';
+			mySend(kCK, buf, strlen(buf));
+		}
+		
 		int iError = reqRecv(kCK);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
@@ -379,6 +426,51 @@ void MyIOCP::handAccept(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBy
 	acceptOne();
 }
 
+void MyIOCP::handConnect(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfBytesTransferred)
+{
+	MySharedCompleteKey kCK = pkOL->kSharedCk;
+	bool bSucc = false;
+	do
+	{
+		if (IoResult != ERROR_SUCCESS)
+		{
+			printf("handConnect IoResult=%d\n", IoResult);
+			break;
+		}
+		
+		if (setsockopt(kCK->uiSocket,
+			SOL_SOCKET,
+			SO_UPDATE_CONNECT_CONTEXT,
+			(const char*)&_ListenCK->uiSocket,
+			sizeof(SOCKET)) == SOCKET_ERROR)
+		{
+			printf("handConnect setsockopt SO_UPDATE_CONNECT_CONTEXT error=%d\n",
+				WSAGetLastError());
+			break;
+		}
+
+		printf("CONNECT: ip[%s], port[%u]----\n", kCK->pcRemoteIp, kCK->usRemotePort);
+
+		mySend(kCK, myBuffer("hello", sizeof("hello")));
+
+		int iError = reqRecv(kCK);
+		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
+		{
+			printf("handConnect reqRecv fail iError=%d\n", iError);
+			break;
+		}
+		bSucc = true;
+	} while (0);
+
+	if (!bSucc)
+	{
+		closesocket(kCK->uiSocket);
+		CloseThreadpoolIo(kCK->pkIO);
+	}
+
+	delete pkOL;
+}
+
 void MyIOCP::initExtensionFuncPtr()
 {
 	SOCKET uiSocket = WSASocketW(
@@ -398,6 +490,8 @@ void MyIOCP::initExtensionFuncPtr()
 	getExtensionFuncPtr((LPVOID*)&_pfnDisconnectEx, uiSocket, guid);
 	guid = WSAID_GETACCEPTEXSOCKADDRS;
 	getExtensionFuncPtr((LPVOID*)&_lpfnGetAcceptExSockAddrs, uiSocket, guid);
+	guid = WSAID_CONNECTEX;
+	getExtensionFuncPtr((LPVOID*)&_pfnConnectEx, uiSocket, guid);
 }
 
 int MyIOCP::reqSend(MySharedCompleteKey kCK, myBuffer& rSend)
@@ -432,6 +526,33 @@ int MyIOCP::reqSend(MySharedCompleteKey kCK, myBuffer& rSend)
 int MyIOCP::reqRecv(MySharedCompleteKey kCK)
 {
 	return postRecv(kCK);
+}
+
+int MyIOCP::reqConnect(MySharedCompleteKey kCK, char * pcIP, unsigned short usPort)
+{
+	SOCKADDR_IN kSockAddrIn;
+	memset(&kSockAddrIn, 0, sizeof(SOCKADDR_IN));
+	kSockAddrIn.sin_family = AF_INET;
+	kSockAddrIn.sin_addr.S_un.S_addr = INADDR_ANY;
+
+	int iError = ERROR_SUCCESS;
+	do 
+	{
+		if (bind(kCK->uiSocket,
+			(SOCKADDR*)&kSockAddrIn,
+			sizeof(kSockAddrIn)) == SOCKET_ERROR)
+		{
+			iError = WSAGetLastError();
+			break;
+		}
+
+		InetPton(kSockAddrIn.sin_family, pcIP, &kSockAddrIn.sin_addr);
+		kSockAddrIn.sin_port = htons(usPort);
+		iError = postConnect(_pfnConnectEx, kCK, (SOCKADDR*)&kSockAddrIn, sizeof(SOCKADDR_IN));
+	} while (0);
+
+
+	return iError;
 }
 
 
