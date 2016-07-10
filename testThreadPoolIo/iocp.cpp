@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include "iocp.h"
 #include <Ws2tcpip.h>
-#include <gperftools/heap-profiler.h>
-#include <gperftools/malloc_extension.h>
+//#include <gperftools/heap-profiler.h>
+//#include <gperftools/malloc_extension.h>
 
 VOID CALLBACK IoCompletionCallback(PTP_CALLBACK_INSTANCE Instance, 
 	PVOID Context, 
@@ -350,15 +350,19 @@ void MyIOCP::handRecv(ULONG IoResult, PMyOverlapped pkOL, ULONG_PTR NumberOfByte
 		printf("RECV:[%s] <- ip[%s], port[%u]\n", pkOL->kBuffer.beginRead(),
 			kCK->pcRemoteIp, kCK->usRemotePort);
 
-		if (!_stricmp(pkOL->kBuffer.beginRead(), "memstat"))
+		if (!_stricmp(pkOL->kBuffer.beginRead(), "hello"))
 		{
-			char buf[1024 * 64] = { 0 };
-			buf[0] = '\n';
-			MallocExtension::instance()->GetStats(buf + 1, sizeof(buf) - 1);
-			buf[strlen(buf)] = '\n';
-			mySend(kCK, buf, strlen(buf));
+			//char buf[1024 * 64] = { 0 };
+			//buf[0] = '\n';
+			//MallocExtension::instance()->GetStats(buf + 1, sizeof(buf) - 1);
+			//buf[strlen(buf)] = '\n';
+			//mySend(kCK, buf, strlen(buf));
+			break;
 		}
-		
+		else
+		{
+			mySend(kCK, pkOL->kBuffer);
+		}
 		int iError = reqRecv(kCK);
 		if (iError != ERROR_SUCCESS && iError != WSA_IO_PENDING)
 		{
