@@ -1,0 +1,3 @@
+[submodule "jemalloc"]
+	path = jemalloc
+	url = git@github.com:zhb1990/jemalloc.git
