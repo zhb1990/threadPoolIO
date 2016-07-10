@@ -3,6 +3,13 @@
 #include <map>
 #include <memory>
 #include <time.h>
+#include <iostream>
+
+#include <jemalloc/jemalloc.h>
+#include <cmdline.h>
+
+#include "myAllocator.h"
+
 #include "iocp.h"
 #include "lock.h"
 
@@ -59,8 +66,32 @@ inline int rand3(int data)	  //[0,i)   =[0,i-1]
 	return (int)(((__int64)(((rand() & 0x7fff) << 15)) | (rand() & 0x7fff))) % data;
 }
 
+typedef std::basic_stringstream<char, std::char_traits<char>, MyAlloc<char>> myStringStream;
+void mtPrint(void* pkStream, const char* pcStr)
+{
+	(*(myStringStream*)pkStream) << pcStr;
+}
 int main(int argc, char **argv)
 {
+	myStringStream kString;
+	je_malloc_stats_print(&mtPrint, &kString, NULL);
+
+	std::basic_string<char, std::char_traits<char>, MyAlloc<char>> mystring = kString.str();
+	std::cout << "len" << mystring.length() << std::endl;
+
+	je_malloc_stats_print(NULL, NULL, NULL);
+	std::vector<myBuffer, MyAlloc<myBuffer>> vecTest;
+	myBuffer kCK;
+	vecTest.push_back(kCK);
+	
+
+	je_malloc_stats_print(NULL, NULL, NULL);
+
+	vecTest.clear();
+	vecTest.shrink_to_fit();
+
+	je_malloc_stats_print(NULL, NULL, NULL);
+
 	WSADATA kWSAData;
 	int iRet = ::WSAStartup(MAKEWORD(2, 2), &kWSAData);
 	if (iRet != 0)

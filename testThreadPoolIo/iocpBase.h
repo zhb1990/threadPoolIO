@@ -44,7 +44,7 @@ public:
 		long lCnt = InterlockedIncrement(&lCntBufferCreate);
 		std::cout << "myBuffer :" << lCnt << std::endl;
 	}
-	myBuffer(myBuffer& buffer)
+	myBuffer(const myBuffer& buffer)
 		:_buf(MY_PAGE_NUM)
 	{
 		_readPos = buffer._readPos;
@@ -207,6 +207,7 @@ typedef struct _CompleteKey
 		long lCnt = InterlockedIncrement(&lCnt_CompleteKeyCreate);
 		std::cout << "_CompleteKey :" << lCnt << std::endl;
 	}
+
 	~_CompleteKey()
 	{
 		long lCnt = InterlockedDecrement(&lCnt_CompleteKeyCreate);

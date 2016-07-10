@@ -13,6 +13,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="头文件\iocp">
+      <UniqueIdentifier>{b21dbba2-9aa6-4243-b438-4254a765916d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\cmdline">
+      <UniqueIdentifier>{e071aaa2-a353-4e64-87fe-eed2498864b8}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -26,13 +32,19 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="iocp.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <ClInclude Include="lock.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="iocp.h">
+      <Filter>头文件\iocp</Filter>
+    </ClInclude>
     <ClInclude Include="iocpBase.h">
+      <Filter>头文件\iocp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\cmdline\cmdline.h">
+      <Filter>头文件\cmdline</Filter>
+    </ClInclude>
+    <ClInclude Include="myAllocator.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

@@ -1,3 +1,6 @@
 [submodule "jemalloc"]
 	path = jemalloc
 	url = git@github.com:zhb1990/jemalloc.git
+[submodule "cmdline"]
+	path = cmdline
+	url = git@github.com:zhb1990/cmdline.git
